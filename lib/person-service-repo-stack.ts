@@ -143,29 +143,29 @@ export class PersonServiceRepoStack extends cdk.Stack {
     }));
 
     // eventBus.grantPutEventsTo(streamLambda);
-    
+
     // Create event source for DynamoDB stream to trigger Lambda
     const streamEventSource = new eventSources.DynamoEventSource(dynamoTable, {
       startingPosition: lambda.StartingPosition.LATEST,
     });
     streamLambda.addEventSource(streamEventSource);
-      // Create a Log Group for CloudWatch Logs
-      const logGroup = new logs.LogGroup(this, 'EventLogGroup', {
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      });
-  
-      // Create a CloudWatch Logs target for EventBridge events
-      const cloudWatchLogsTarget = new eventTargets.CloudWatchLogGroup(logGroup);
-  
-      // Create EventBridge rule to route DynamoDB Stream events to CloudWatch Logs
-      new eventbridge.Rule(this, 'InspectDDBStreamEventsRule', {
-        eventBus: eventBus,
-        eventPattern: {
-          source: ['ddb.source'],  // Ensure the source matches the one used in your events
-          detailType: ['DynamoDBStreamEvent'],
-        },
-        targets: [cloudWatchLogsTarget],  // Target CloudWatch Logs for inspection
-      });
+    // Create a Log Group for CloudWatch Logs
+    const logGroup = new logs.LogGroup(this, 'EventLogGroup', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Create a CloudWatch Logs target for EventBridge events
+    const cloudWatchLogsTarget = new eventTargets.CloudWatchLogGroup(logGroup);
+
+    // Create EventBridge rule to route DynamoDB Stream events to CloudWatch Logs
+    new eventbridge.Rule(this, 'InspectDDBStreamEventsRule', {
+      eventBus,
+      eventPattern: {
+        source: ['ddb.source'],  // Ensure the source matches the one used in your events
+        detailType: ['DynamoDBStreamEvent'],
+      },
+      targets: [cloudWatchLogsTarget],  // Target CloudWatch Logs for inspection
+    });
     // Lambda function for email & logging service
     const emailServiceLambda = new lambda.Function(this, 'EmailSvcLambda', {
       runtime: lambda.Runtime.PROVIDED_AL2023,
@@ -173,17 +173,36 @@ export class PersonServiceRepoStack extends cdk.Stack {
       code: lambda.Code.fromAsset('lambdas/email'), // Path to your Go Lambda function
       handler: 'main',
     });
+
+    emailServiceLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'logs:CreateLogGroup',
+        'logs:CreateLogStream',
+        'logs:PutLogEvents',
+      ],
+      effect: iam.Effect.ALLOW,
+      resources: [
+        // `arn:aws:logs:${this.region}:${this.account}:*`
+        '*'
+      ],
+    }));
+
+    const emailLambdaExecutionRole = emailServiceLambda.role!;
+    emailLambdaExecutionRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'));
     // EventBridge rule to trigger the consumer Lambda
-    new eventbridge.Rule(this, 'EventBridgeRule', {
-      eventBus: eventBus,
-      eventPattern: {
-        source: ['ddb.source'],
-        //     source: ['aws.dynamodb'],
-        detailType: ['DynamoDBStreamEvent'],
-        resources: [dynamoTable.tableStreamArn || ''],
-      },
-      targets: [new eventTargets.LambdaFunction(emailServiceLambda)],
-    });
+    if(dynamoTable.tableStreamArn) {
+      new eventbridge.Rule(this, 'EventBridgeRule', {
+        eventBus,
+        eventPattern: {
+          source: ['ddb.source'],
+          //     source: ['aws.dynamodb'],
+          detailType: ['DynamoDBStreamEvent'],
+          resources: [dynamoTable.tableStreamArn],
+        },
+        targets: [new eventTargets.LambdaFunction(emailServiceLambda)],
+      });
+    }
+    
   }
 }
 

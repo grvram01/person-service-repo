@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"log"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -18,14 +18,20 @@ type EventBridgeClient struct {
 }
 
 func (e *EventBridgeClient) PutEvent(source string, detailType string, detail map[string]interface{}) error {
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		log.Printf("Error marshalling detail to JSON: %v", err)
+		return err
+	}
+
 	event := &eventbridge.PutEventsRequestEntry{
 		Source:       aws.String(source),
 		DetailType:   aws.String(detailType),
-		Detail:       aws.String(fmt.Sprintf("%v", detail)),
+		Detail:       aws.String(string(detailJSON)),
 		EventBusName: aws.String("DDBStreamCustomEventBus"),
 	}
 
-	_, err := e.client.PutEvents(&eventbridge.PutEventsInput{
+	_, err = e.client.PutEvents(&eventbridge.PutEventsInput{
 		Entries: []*eventbridge.PutEventsRequestEntry{event},
 	})
 

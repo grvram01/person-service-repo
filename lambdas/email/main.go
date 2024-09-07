@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -18,5 +19,6 @@ func handler(ctx context.Context, event events.CloudWatchEvent) error {
 }
 
 func main() {
+	log.Print("email lambda invoked....")
 	lambda.Start(handler)
 }

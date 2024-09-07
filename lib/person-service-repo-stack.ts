@@ -6,6 +6,9 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as eventbridge from 'aws-cdk-lib/aws-events';
 import * as eventTargets from 'aws-cdk-lib/aws-events-targets';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as eventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 export function addCorsOptions(apiResource: apigateway.IResource) {
   apiResource.addMethod('OPTIONS', new apigateway.MockIntegration({
@@ -48,7 +51,15 @@ export class PersonServiceRepoStack extends cdk.Stack {
       // Used for testing. Destroy table upon stack removal
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-
+    // Lambda function that will be triggered by DynamoDB Streams and publish to EventBridge
+    const streamLambda = new lambda.Function(this, 'StreamLambda', {
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      architecture: lambda.Architecture.X86_64,
+      handler: 'main',  // Go handler name
+      code: lambda.Code.fromAsset('lambdas/stream'),  // Your Go lambda code
+    });
+    // Grant the Lambda function read access to the DynamoDB Stream
+    dynamoTable.grantStreamRead(streamLambda);
     // HTTP Lambda to handle API Gateway requests
     const httpLambda = new lambda.Function(this, 'HttpLambda', {
       runtime: lambda.Runtime.PROVIDED_AL2023,
@@ -69,8 +80,6 @@ export class PersonServiceRepoStack extends cdk.Stack {
       handler: httpLambda,
       proxy: false,
     });
-
-
     // Define API Gateway routes
     const personsResource = api.root.addResource('persons');
     personsResource.addMethod('GET');
@@ -121,44 +130,60 @@ export class PersonServiceRepoStack extends cdk.Stack {
         validateRequestParameters: true,
       }),
     });
+    addCorsOptions(personById)
     // EventBridge Event Bus
-    const eventBus = new eventbridge.EventBus(this, 'PersonSvc3EventBus', {
-      eventBusName: 'DDBEventBus',
-    });
 
-    // EventBridge Rule to route DynamoDB Stream events
-    const eventRule = new eventbridge.Rule(this, 'DDBStreamRule', {
-      eventBus,
-      eventPattern: {
-        source: ['aws.dynamodb'],
-        detailType: ['DynamoDB Stream Record'],
-        resources: ['dynamoTable.tableStreamArn'],
-      },
+    // Grant permission for Lambda to publish events to EventBridge
+    const eventBus = new eventbridge.EventBus(this, 'DDBStreamEventBus', {
+      eventBusName: 'DDBStreamCustomEventBus',
     });
+    streamLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['events:PutEvents'],
+      resources: [eventBus.eventBusArn], // Grant permission to use the event bus
+    }));
 
-    // Lambda function for Email Service
+    // eventBus.grantPutEventsTo(streamLambda);
+    
+    // Create event source for DynamoDB stream to trigger Lambda
+    const streamEventSource = new eventSources.DynamoEventSource(dynamoTable, {
+      startingPosition: lambda.StartingPosition.LATEST,
+    });
+    streamLambda.addEventSource(streamEventSource);
+      // Create a Log Group for CloudWatch Logs
+      const logGroup = new logs.LogGroup(this, 'EventLogGroup', {
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+  
+      // Create a CloudWatch Logs target for EventBridge events
+      const cloudWatchLogsTarget = new eventTargets.CloudWatchLogGroup(logGroup);
+  
+      // Create EventBridge rule to route DynamoDB Stream events to CloudWatch Logs
+      new eventbridge.Rule(this, 'InspectDDBStreamEventsRule', {
+        eventBus: eventBus,
+        eventPattern: {
+          source: ['ddb.source'],  // Ensure the source matches the one used in your events
+          detailType: ['DynamoDBStreamEvent'],
+        },
+        targets: [cloudWatchLogsTarget],  // Target CloudWatch Logs for inspection
+      });
+    // Lambda function for email & logging service
     const emailServiceLambda = new lambda.Function(this, 'EmailSvcLambda', {
       runtime: lambda.Runtime.PROVIDED_AL2023,
       architecture: lambda.Architecture.X86_64,
       code: lambda.Code.fromAsset('lambdas/email'), // Path to your Go Lambda function
       handler: 'main',
     });
-
-    // Lambda function for Logging Service
-    const loggingServiceLambda = new lambda.Function(this, 'LoggingSvcLambda', {
-      runtime: lambda.Runtime.PROVIDED_AL2023,
-      architecture: lambda.Architecture.X86_64,
-      code: lambda.Code.fromAsset('lambdas/logging'), // Path to your Go Lambda function
-      handler: 'main',
+    // EventBridge rule to trigger the consumer Lambda
+    new eventbridge.Rule(this, 'EventBridgeRule', {
+      eventBus: eventBus,
+      eventPattern: {
+        source: ['ddb.source'],
+        //     source: ['aws.dynamodb'],
+        detailType: ['DynamoDBStreamEvent'],
+        resources: [dynamoTable.tableStreamArn || ''],
+      },
+      targets: [new eventTargets.LambdaFunction(emailServiceLambda)],
     });
-
-    // Add Lambda Targets to the EventBridge Rule
-    eventRule.addTarget(new eventTargets.LambdaFunction(emailServiceLambda));
-    eventRule.addTarget(new eventTargets.LambdaFunction(loggingServiceLambda));
-
-    // Grant EventBridge permissions to invoke the Lambda functions
-    eventBus.grantPutEventsTo(emailServiceLambda);
-    eventBus.grantPutEventsTo(loggingServiceLambda);
   }
 }
 

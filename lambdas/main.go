@@ -130,6 +130,9 @@ func handlePut(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRes
 }
 
 func handleGet(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Using SCAN for development purpose.
+	// GET all call can be optimised using pagination(by reading lastEvaluatedKey flag from ddb)
+	// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.Pagination.html
 	personId := request.PathParameters["personId"]
 
 	if personId != "" {
@@ -179,6 +182,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return handlePut(request)
 	case "GET":
 		return handleGet(ctx, request)
+	// add delete person logic here
 	default:
 		return events.APIGatewayProxyResponse{StatusCode: http.StatusMethodNotAllowed, Body: "Method not allowed"}, nil
 	}

@@ -69,7 +69,7 @@ export class PersonServiceRepoStack extends cdk.Stack {
       handler: httpLambda,
       proxy: false,
     });
-    
+
 
     // Define API Gateway routes
     const personsResource = api.root.addResource('persons');
@@ -86,7 +86,7 @@ export class PersonServiceRepoStack extends cdk.Stack {
           firstName: { type: apigateway.JsonSchemaType.STRING },
           phoneNumber: { type: apigateway.JsonSchemaType.STRING },
         },
-        required: ['firstName', 'phoneNumber'],
+        required: ['firstName', 'phoneNumber', 'lastName', 'address'],
       },
     });
 
@@ -104,6 +104,23 @@ export class PersonServiceRepoStack extends cdk.Stack {
       requestValidator,
     });
     addCorsOptions(personsResource)
+    // Route for GET, PUT, DELETE by personId
+    const personById = personsResource.addResource('{personId}');
+    // GET - Retrieve a person by personId
+    personById.addMethod('GET', new apigateway.LambdaIntegration(httpLambda), {
+      requestValidator: new apigateway.RequestValidator(this, 'GetRequestValidator', {
+        restApi: api,
+        validateRequestParameters: true,
+      }),
+    });
+
+    personById.addMethod('PUT', new apigateway.LambdaIntegration(httpLambda), {
+      requestValidator: new apigateway.RequestValidator(this, 'PutRequestValidator', {
+        restApi: api,
+        validateRequestBody: true,
+        validateRequestParameters: true,
+      }),
+    });
     // EventBridge Event Bus
     const eventBus = new eventbridge.EventBus(this, 'PersonSvc3EventBus', {
       eventBusName: 'DDBEventBus',

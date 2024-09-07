@@ -52,12 +52,10 @@ func handlePost(ctx context.Context, request events.APIGatewayProxyRequest) (eve
 	// Parse the request body
 	var person Person
 	err := json.Unmarshal([]byte(request.Body), &person)
-	log.Print("before...")
 	if err != nil {
 		log.Printf("Failed to parse request body: %v", err)
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: "Invalid input"}, nil
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: "Invalid input for POST"}, nil
 	}
-	log.Print("successfully ingested request..")
 
 	// Generate a new UUID for the personId
 	personID := uuid.New().String()
@@ -76,7 +74,6 @@ func handlePost(ctx context.Context, request events.APIGatewayProxyRequest) (eve
 		TableName: aws.String(tableName),
 		Item:      item,
 	})
-	log.Print("put operation performed....")
 	if err != nil {
 		log.Printf("Failed to insert item into DynamoDB: %v", err)
 		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: fmt.Sprintf("Failed to insert item: %v", err)}, nil
@@ -100,7 +97,93 @@ func handlePost(ctx context.Context, request events.APIGatewayProxyRequest) (eve
 	}, nil
 }
 
+func handlePut(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	personId := request.PathParameters["personId"]
+	if personId == "" {
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: "Missing personId"}, nil
+	}
+
+	var person Person
+	if err := json.Unmarshal([]byte(request.Body), &person); err != nil {
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: "Invalid input"}, nil
+	}
+
+	updateExpression := "SET firstName = :firstName, phoneNumber = :phoneNumber, lastName = :lastName, address = :address"
+	expressionAttributeValues := map[string]types.AttributeValue{
+		":firstName":   &types.AttributeValueMemberS{Value: person.FirstName},
+		":phoneNumber": &types.AttributeValueMemberS{Value: person.PhoneNumber},
+		":lastName":    &types.AttributeValueMemberS{Value: person.LastName},
+		":address":     &types.AttributeValueMemberS{Value: person.Address},
+	}
+
+	_, err := svc.UpdateItem(context.TODO(), &dynamodb.UpdateItemInput{
+		TableName:                 aws.String(tableName),
+		Key:                       map[string]types.AttributeValue{"personId": &types.AttributeValueMemberS{Value: personId}},
+		UpdateExpression:          aws.String(updateExpression),
+		ExpressionAttributeValues: expressionAttributeValues,
+	})
+	if err != nil {
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+	}
+
+	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: "Item updated successfully"}, nil
+}
+
+func handleGet(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	personId := request.PathParameters["personId"]
+
+	if personId != "" {
+		// Retrieve a single item by personId
+		result, err := svc.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName: aws.String(tableName),
+			Key: map[string]types.AttributeValue{
+				"personId": &types.AttributeValueMemberS{Value: personId},
+			},
+		})
+		if err != nil {
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+		}
+		if result.Item == nil {
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusNotFound, Body: "Item not found"}, nil
+		}
+
+		itemJSON, err := json.Marshal(result.Item)
+		if err != nil {
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+		}
+
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: string(itemJSON)}, nil
+	}
+
+	// Retrieve all items if personId is not provided
+	result, err := svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String(tableName),
+	})
+	if err != nil {
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+	}
+
+	itemsJSON, err := json.Marshal(result.Items)
+	if err != nil {
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+	}
+
+	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: string(itemsJSON)}, nil
+}
+
+func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	switch request.HTTPMethod {
+	case "POST":
+		return handlePost(ctx, request)
+	case "PUT":
+		return handlePut(request)
+	case "GET":
+		return handleGet(ctx, request)
+	default:
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusMethodNotAllowed, Body: "Method not allowed"}, nil
+	}
+}
+
 func main() {
-	log.Print("ingesting request..")
-	lambda.Start(handlePost)
+	lambda.Start(handler)
 }

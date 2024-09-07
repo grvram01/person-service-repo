@@ -1,119 +1,106 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/google/uuid"
 )
 
 var (
-	// tableName = os.Getenv("TABLE_NAME")
-	tableName = "PersonsDynamoTable"
-	svc       *dynamodb.DynamoDB
+	tableName string
+	svc       *dynamodb.Client
 )
 
+func init() {
+	tableName = os.Getenv("TABLE_NAME") // TableName is set via Lambda environment variable
+
+	// Load AWS configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	// Create DynamoDB client
+	svc = dynamodb.NewFromConfig(cfg)
+}
+
+// Person represents the data model for a person
 type Person struct {
 	FirstName   string `json:"firstName"`
 	LastName    string `json:"lastName"`
-	PhoneNumber string `json:"phoneNumber"`
 	Address     string `json:"address"`
+	PhoneNumber string `json:"phoneNumber"`
 }
 
-func init() {
-	sess := session.Must(session.NewSession())
-	svc = dynamodb.New(sess)
+// ResponseBody defines the structure of the response sent back to the client
+type ResponseBody struct {
+	PersonID string `json:"personId"`
 }
 
-func handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	switch request.HTTPMethod {
-	case "GET":
-		id := request.QueryStringParameters["id"]
-		if id == "" {
-			return handleGetAll()
-		}
-		return handleGet(id)
-	case "POST":
-		return handlePost(request)
-	default:
-		return events.APIGatewayProxyResponse{
-			StatusCode: http.StatusMethodNotAllowed,
-			Body:       "Method not allowed",
-		}, nil
-	}
-}
-
-func handleGet(personId string) (events.APIGatewayProxyResponse, error) {
-	input := &dynamodb.GetItemInput{
-		TableName: aws.String(tableName),
-		Key: map[string]*dynamodb.AttributeValue{
-			"PK": {
-				S: aws.String(personId),
-			},
-		},
-	}
-
-	result, err := svc.GetItem(input)
+func handlePost(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Parse the request body
+	var person Person
+	err := json.Unmarshal([]byte(request.Body), &person)
+	log.Print("before...")
 	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
-	}
-	if result.Item == nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusNotFound, Body: "Item not found"}, nil
-	}
-
-	item, err := json.Marshal(result.Item)
-	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
-	}
-
-	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: string(item)}, nil
-}
-
-func handleGetAll() (events.APIGatewayProxyResponse, error) {
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(tableName),
-	}
-
-	result, err := svc.Scan(input)
-	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
-	}
-
-	items, err := json.Marshal(result.Items)
-	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
-	}
-
-	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: string(items)}, nil
-}
-
-func handlePost(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	var item map[string]*dynamodb.AttributeValue
-	if err := json.Unmarshal([]byte(request.Body), &item); err != nil {
-		log.Print("request body --->")
-		log.Print(request.Body)
+		log.Printf("Failed to parse request body: %v", err)
 		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: "Invalid input"}, nil
 	}
+	log.Print("successfully ingested request..")
 
-	input := &dynamodb.PutItemInput{
+	// Generate a new UUID for the personId
+	personID := uuid.New().String()
+
+	// Map the Person struct and generated personId to DynamoDB attribute values
+	item := map[string]types.AttributeValue{
+		"personId":    &types.AttributeValueMemberS{Value: personID}, // Partition Key
+		"firstName":   &types.AttributeValueMemberS{Value: person.FirstName},
+		"phoneNumber": &types.AttributeValueMemberS{Value: person.PhoneNumber},
+		"lastName":    &types.AttributeValueMemberS{Value: person.LastName},
+		"address":     &types.AttributeValueMemberS{Value: person.Address},
+	}
+
+	// Put the item into DynamoDB
+	_, err = svc.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(tableName),
 		Item:      item,
-	}
-
-	_, err := svc.PutItem(input)
+	})
+	log.Print("put operation performed....")
 	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, nil
+		log.Printf("Failed to insert item into DynamoDB: %v", err)
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: fmt.Sprintf("Failed to insert item: %v", err)}, nil
 	}
 
-	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: "Item inserted successfully"}, nil
+	// Prepare the response body
+	responseBody := ResponseBody{
+		PersonID: personID,
+	}
+
+	responseJSON, err := json.Marshal(responseBody)
+	if err != nil {
+		log.Printf("Failed to marshal response body: %v", err)
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: "Error generating response"}, nil
+	}
+
+	// Return success response with the generated personId
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Body:       string(responseJSON),
+	}, nil
 }
 
 func main() {
-	log.Print("http lambda invoked...")
-	lambda.Start(handler)
+	log.Print("ingesting request..")
+	lambda.Start(handlePost)
 }

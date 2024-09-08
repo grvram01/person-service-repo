@@ -41,10 +41,14 @@ The stack consists of:
    cd lambdas/email
    GOOS=linux GOARCH=amd64 go build -o main
 
-4. **Synthesize the Stack(To output Cloudformation template)**:
-    cdk synth
+4. Go back to the source directory
+   cd person-service-repo
+
+5. **Synthesize the Stack(To output Cloudformation template)**:
+   
+   cdk synth
     
-5. **Deploy the Stack**:
+6. **Deploy the Stack**:
     cdk deploy
 
 ## API Endpoints

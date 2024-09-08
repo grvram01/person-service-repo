@@ -92,22 +92,6 @@ export class PersonServiceRepoStack extends cdk.Stack {
     personById.addMethod('GET', new apigateway.LambdaIntegration(httpLambda));
     personById.addMethod('PUT', new apigateway.LambdaIntegration(httpLambda));
     personById.addMethod('DELETE', new apigateway.LambdaIntegration(httpLambda));
-    // Log Group for CloudWatch Logs
-    const logGroup = new logs.LogGroup(this, 'EventLogGroup', {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      retention: logs.RetentionDays.ONE_WEEK,
-    });
-
-    // EventBridge Rule (DynamoDB Stream -> CloudWatch Logs)
-    new eventbridge.Rule(this, 'InspectDDBStreamEventsRule', {
-      eventBus,
-      eventPattern: {
-        source: ['ddb.source'],
-        detailType: ['DynamoDBStreamEvent'],
-      },
-      targets: [new eventTargets.CloudWatchLogGroup(logGroup)],
-    });
-
     // Email Lambda Function
     const emailServiceLambda = new lambda.Function(this, 'EmailSvcLambda', {
       runtime: lambda.Runtime.PROVIDED_AL2023,

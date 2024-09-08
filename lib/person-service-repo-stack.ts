@@ -10,35 +10,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as eventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as logs from 'aws-cdk-lib/aws-logs';
 
-// Helper function to add CORS options
-export function addCorsOptions(apiResource: apigateway.IResource) {
-  apiResource.addMethod('OPTIONS', new apigateway.MockIntegration({
-    integrationResponses: [{
-      statusCode: '200',
-      responseParameters: {
-        'method.response.header.Access-Control-Allow-Headers': "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'",
-        'method.response.header.Access-Control-Allow-Origin': "'*'",
-        'method.response.header.Access-Control-Allow-Credentials': "'false'",
-        'method.response.header.Access-Control-Allow-Methods': "'OPTIONS,GET,PUT,POST,DELETE'",
-      },
-    }],
-    passthroughBehavior: apigateway.PassthroughBehavior.NEVER,
-    requestTemplates: {
-      "application/json": "{\"statusCode\": 200}"
-    },
-  }), {
-    methodResponses: [{
-      statusCode: '200',
-      responseParameters: {
-        'method.response.header.Access-Control-Allow-Headers': true,
-        'method.response.header.Access-Control-Allow-Methods': true,
-        'method.response.header.Access-Control-Allow-Credentials': true,
-        'method.response.header.Access-Control-Allow-Origin': true,
-      },
-    }]
-  });
-}
-
 export class PersonServiceRepoStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -82,10 +53,12 @@ export class PersonServiceRepoStack extends cdk.Stack {
       },
     });
     dynamoTable.grantReadWriteData(httpLambda);
-    // API Gateway
-    const api = new apigateway.LambdaRestApi(this, 'ApiGateway', {
-      handler: httpLambda,
-      proxy: false,
+    const api = new apigateway.RestApi(this, 'ApiGateway', {
+      restApiName: 'PersonServiceAPI',
+      description: 'This API handles person records.',
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+      },
     });
 
     const personsResource = api.root.addResource('persons');
@@ -119,8 +92,6 @@ export class PersonServiceRepoStack extends cdk.Stack {
     personById.addMethod('GET', new apigateway.LambdaIntegration(httpLambda));
     personById.addMethod('PUT', new apigateway.LambdaIntegration(httpLambda));
     personById.addMethod('DELETE', new apigateway.LambdaIntegration(httpLambda));
-    addCorsOptions(personById);
-
     // Log Group for CloudWatch Logs
     const logGroup = new logs.LogGroup(this, 'EventLogGroup', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,

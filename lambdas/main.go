@@ -174,6 +174,41 @@ func handleGet(ctx context.Context, request events.APIGatewayProxyRequest) (even
 	return events.APIGatewayProxyResponse{StatusCode: http.StatusOK, Body: string(itemsJSON)}, nil
 }
 
+func handleDelete(personId string, tableName string) events.APIGatewayProxyResponse {
+	// Load the AWS SDK configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("eu-west-1"))
+	if err != nil {
+		log.Printf("unable to load SDK config, %v", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf("Failed to load AWS config: %v", err),
+		}
+	}
+	// Create a DynamoDB client
+	svc := dynamodb.NewFromConfig(cfg)
+	// Define the input for the delete operation
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"personId": &types.AttributeValueMemberS{
+				Value: personId,
+			},
+		},
+	}
+	// Perform the delete operation
+	_, err = svc.DeleteItem(context.TODO(), input)
+	if err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf("Failed to delete item: %v", err),
+		}
+	}
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Body:       "Person deleted successfully",
+	}
+}
+
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	switch request.HTTPMethod {
 	case "POST":
@@ -182,9 +217,14 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return handlePut(request)
 	case "GET":
 		return handleGet(ctx, request)
-	// add delete person logic here
+	case "DELETE":
+		personId := request.PathParameters["personId"]
+		return handleDelete(personId, tableName), nil
 	default:
-		return events.APIGatewayProxyResponse{StatusCode: http.StatusMethodNotAllowed, Body: "Method not allowed"}, nil
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusMethodNotAllowed,
+			Body:       "Method not allowed",
+		}, nil
 	}
 }
 

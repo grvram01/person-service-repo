@@ -82,7 +82,6 @@ export class PersonServiceRepoStack extends cdk.Stack {
       },
     });
     dynamoTable.grantReadWriteData(httpLambda);
-
     // API Gateway
     const api = new apigateway.LambdaRestApi(this, 'ApiGateway', {
       handler: httpLambda,
@@ -108,22 +107,18 @@ export class PersonServiceRepoStack extends cdk.Stack {
         required: ['firstName', 'phoneNumber', 'lastName', 'address'],
       },
     });
-
     const requestValidator = new apigateway.RequestValidator(this, 'RequestValidator', {
       restApi: api,
       validateRequestBody: true,
     });
-
     personsResource.addMethod('POST', new apigateway.LambdaIntegration(httpLambda), {
       requestModels: { 'application/json': postModel },
       requestValidator,
     });
-
-    addCorsOptions(personsResource);
-
     const personById = personsResource.addResource('{personId}');
     personById.addMethod('GET', new apigateway.LambdaIntegration(httpLambda));
     personById.addMethod('PUT', new apigateway.LambdaIntegration(httpLambda));
+    personById.addMethod('DELETE', new apigateway.LambdaIntegration(httpLambda));
     addCorsOptions(personById);
 
     // Log Group for CloudWatch Logs

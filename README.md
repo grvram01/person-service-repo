@@ -19,6 +19,9 @@ The stack consists of:
 - **EventBridge**: Routes events triggered by DynamoDB streams to the email notification Lambda and CloudWatch Logs.
 - **Email Service Lambda**: This function would send email notifications based on events. For now, it serves as a placeholder.
 
+## Infrastructure Diagram
+![Alt text](./architecture.png)
+
 ## Installation and Deployment
    
 1. **Clone the Repository**:

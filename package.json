@@ -2,7 +2,7 @@
   "name": "person-service-repo",
   "version": "0.1.0",
   "bin": {
-    "person-service-repo": "bin/person-service-repo.js"
+    "person-service-repo": "bin/person-service-repo.ts"
   },
   "scripts": {
     "build": "tsc",
